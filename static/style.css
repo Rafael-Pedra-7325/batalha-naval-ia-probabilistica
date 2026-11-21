@@ -33,7 +33,7 @@ body {
     position: relative;
 }
 
-/* Fundo tático com grade de sonar */
+/* Fundo tático com grade e varredura de sonar */
 .radar-bg {
     position: fixed;
     inset: 0;
@@ -44,6 +44,26 @@ body {
     background-size: 100% 100%, 40px 40px, 40px 40px;
     pointer-events: none;
     z-index: -1;
+    overflow: hidden;
+}
+
+.radar-bg::after {
+    content: "";
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 140vmax;
+    height: 140vmax;
+    margin-top: -70vmax;
+    margin-left: -70vmax;
+    background: conic-gradient(from 0deg, rgba(56, 189, 248, 0.07) 0deg, transparent 55deg, transparent 360deg);
+    border-radius: 50%;
+    animation: sonarSweep 14s linear infinite;
+}
+
+@keyframes sonarSweep {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
 }
 
 .glass-card {
@@ -141,7 +161,7 @@ body {
     cursor: pointer;
 }
 
-/* Botões */
+/* Botões e Toggles */
 .btn {
     border: 1px solid transparent;
     border-radius: 8px;
@@ -184,6 +204,17 @@ body {
     border-color: var(--cyan);
 }
 
+.btn-amber {
+    background: rgba(245, 158, 11, 0.14);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.4);
+}
+
+.btn-amber.active, .btn-amber:hover {
+    background: rgba(245, 158, 11, 0.28);
+    border-color: var(--amber);
+}
+
 .btn-ghost {
     background: rgba(30, 41, 59, 0.65);
     color: var(--text-main);
@@ -204,6 +235,25 @@ body {
 .btn-outline:hover {
     color: var(--text-main);
     border-color: var(--text-main);
+}
+
+.toggle-rule {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.48rem 0.75rem;
+    background: rgba(15, 31, 58, 0.8);
+    border: 1px solid rgba(56, 189, 248, 0.25);
+    border-radius: 8px;
+    font-size: 0.8rem;
+    color: var(--text-main);
+    cursor: pointer;
+    user-select: none;
+}
+
+.toggle-rule input {
+    accent-color: var(--cyan);
+    cursor: pointer;
 }
 
 .dot-live {
@@ -254,6 +304,7 @@ body {
 
 .setup-actions {
     display: flex;
+    align-items: center;
     flex-wrap: wrap;
     gap: 0.6rem;
 }
@@ -353,7 +404,7 @@ body {
     font-weight: 600;
 }
 
-/* Grid Naval 11x11 (Cabeçalhos + 10x10) */
+/* Grid Naval 11x11 */
 .naval-grid {
     display: grid;
     grid-template-columns: 28px repeat(10, 1fr);
@@ -436,12 +487,37 @@ body {
 
 .cell.sunk {
     background: rgba(239, 68, 68, 0.38) !important;
-    border-color: var(--crimson) !important;
+    border: 2px solid #f87171 !important;
 }
 
 .cell.sunk::after {
     content: "💥";
     font-size: 0.95rem;
+}
+
+/* Contorno unificado para embarcações afundadas */
+.cell.sunk-conn-top {
+    border-top-color: rgba(248, 113, 113, 0.18) !important;
+    border-top-left-radius: 0;
+    border-top-right-radius: 0;
+}
+
+.cell.sunk-conn-bottom {
+    border-bottom-color: rgba(248, 113, 113, 0.18) !important;
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.cell.sunk-conn-left {
+    border-left-color: rgba(248, 113, 113, 0.18) !important;
+    border-top-left-radius: 0;
+    border-bottom-left-radius: 0;
+}
+
+.cell.sunk-conn-right {
+    border-right-color: rgba(248, 113, 113, 0.18) !important;
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
 }
 
 .cell.last-ai-shot {
@@ -453,7 +529,6 @@ body {
     100% { transform: scale(1); }
 }
 
-/* Valor numérico do Mapa de Calor */
 .heat-label {
     position: relative;
     z-index: 2;
@@ -465,7 +540,7 @@ body {
 /* Arena de Combate */
 .telemetry-bar {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(195px, 1fr));
     gap: 1rem;
     padding: 1rem 1.4rem;
     margin-bottom: 1.35rem;
@@ -491,6 +566,10 @@ body {
 
 .text-cyan {
     color: var(--cyan);
+}
+
+.text-amber {
+    color: #fbbf24;
 }
 
 .font-mono {
@@ -558,7 +637,6 @@ body {
     border: 1px solid rgba(16, 185, 129, 0.4);
 }
 
-/* Status das Frotas abaixo dos grids */
 .fleet-status {
     width: 100%;
     max-width: 460px;
