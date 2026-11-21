@@ -161,6 +161,27 @@ body {
     cursor: pointer;
 }
 
+.hud-input {
+    background: #071122;
+    color: var(--cyan);
+    border: 1px solid var(--border-bright);
+    border-radius: 8px;
+    padding: 0.48rem 0.75rem;
+    font-family: var(--font-mono);
+    font-size: 0.88rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    width: 112px;
+    text-align: center;
+}
+
+.hud-input::placeholder {
+    color: rgba(148, 163, 184, 0.5);
+    letter-spacing: 0.06em;
+    font-weight: 400;
+}
+
 /* Botões e Toggles */
 .btn {
     border: 1px solid transparent;
@@ -174,6 +195,11 @@ body {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
+}
+
+.btn-sm {
+    padding: 0.36rem 0.7rem;
+    font-size: 0.76rem;
 }
 
 .btn:disabled {
@@ -202,6 +228,17 @@ body {
 .btn-cyan.active, .btn-cyan:hover {
     background: rgba(56, 189, 248, 0.24);
     border-color: var(--cyan);
+}
+
+.btn-emerald {
+    background: rgba(16, 185, 129, 0.14);
+    color: #34d399;
+    border-color: rgba(16, 185, 129, 0.45);
+}
+
+.btn-emerald.active, .btn-emerald:hover {
+    background: rgba(16, 185, 129, 0.28);
+    border-color: var(--emerald);
 }
 
 .btn-amber {
@@ -273,6 +310,88 @@ body {
 
 .hidden {
     display: none !important;
+}
+
+/* Painel Multiplayer Online (PvP) */
+.pvp-banner {
+    padding: 1rem 1.4rem;
+    margin-bottom: 1.25rem;
+    border-color: rgba(16, 185, 129, 0.45);
+    background: linear-gradient(135deg, rgba(11, 22, 41, 0.92), rgba(6, 78, 59, 0.25));
+}
+
+.pvp-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.pvp-info h3 {
+    font-family: var(--font-display);
+    font-size: 0.95rem;
+    color: #34d399;
+    margin-bottom: 0.2rem;
+}
+
+.pvp-info p {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+}
+
+.pvp-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.65rem;
+}
+
+.join-group {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.pvp-room-badge {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.room-label {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    font-weight: 600;
+}
+
+.room-code {
+    font-family: var(--font-mono);
+    font-size: 1.15rem;
+    letter-spacing: 0.16em;
+    color: #34d399;
+    background: rgba(16, 185, 129, 0.14);
+    border: 1px solid rgba(16, 185, 129, 0.45);
+    padding: 0.25rem 0.7rem;
+    border-radius: 8px;
+}
+
+.pvp-status-group {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+
+.status-pill-live {
+    font-family: var(--font-mono);
+    font-size: 0.78rem;
+    color: var(--cyan);
+    background: rgba(56, 189, 248, 0.12);
+    border: 1px solid rgba(56, 189, 248, 0.3);
+    padding: 0.35rem 0.75rem;
+    border-radius: 999px;
 }
 
 /* Setup Panel */
@@ -441,12 +560,17 @@ body {
     overflow: hidden;
 }
 
-.attack-grid .cell:not(.shot):hover {
+.attack-grid:not(.waiting-turn) .cell:not(.shot):hover {
     cursor: crosshair;
     border-color: var(--cyan);
     background: rgba(56, 189, 248, 0.22);
     transform: scale(1.04);
     z-index: 2;
+}
+
+.attack-grid.waiting-turn .cell {
+    cursor: not-allowed;
+    opacity: 0.88;
 }
 
 /* Estados das células */
@@ -596,6 +720,7 @@ body {
     justify-content: space-between;
     align-items: center;
     margin-bottom: 0.85rem;
+    gap: 0.5rem;
 }
 
 .board-header h3 {
@@ -635,6 +760,12 @@ body {
     background: rgba(16, 185, 129, 0.16);
     color: var(--emerald);
     border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.turn-badge.waiting {
+    background: rgba(245, 158, 11, 0.16);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.4);
 }
 
 .fleet-status {
@@ -764,5 +895,9 @@ body {
     .setup-body,
     .boards-layout {
         grid-template-columns: 1fr;
+    }
+
+    .topbar {
+        padding: 0.9rem 1rem;
     }
 }
