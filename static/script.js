@@ -3,23 +3,24 @@
     const LETRAS = ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J"];
     const FROTA = window.FROTA_PADRAO || [];
 
-    // Estado global da interface
     const estado = {
         gameId: null,
         mostrarCalor: true,
         somAtivo: true,
         bloqueado: false,
+        modoDemo: false,
+        demoTimer: null,
         ultimaJogadaIA: null,
         dadosJogo: null,
-        // Estado da fase de posicionamento (Setup)
         setup: {
             navioSelecionadoId: FROTA[0]?.id || null,
             horizontal: true,
-            posicionados: {}, // { id: { id, linha, coluna, horizontal, tamanho } }
+            naoAdjacente: false,
+            posicionados: {},
         },
     };
 
-    // Sintetizador de Sonar / Efeitos via Web Audio API (sem arquivos externos)
+    // Sintetizador de Sonar / Efeitos via Web Audio API
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     function tocarSom(tipo) {
         if (!estado.somAtivo) return;
@@ -34,27 +35,27 @@
         if (tipo === "sonar") {
             osc.type = "sine";
             osc.frequency.setValueAtTime(880, agora);
-            osc.frequency.exponentialRampToValueAtTime(440, agora + 0.18);
+            osc.frequency.exponentialRampToValueAtTime(440, agora + 0.16);
+            gain.gain.setValueAtTime(0.06, agora);
+            gain.gain.exponentialRampToValueAtTime(0.001, agora + 0.18);
+            osc.start(agora);
+            osc.stop(agora + 0.18);
+        } else if (tipo === "agua") {
+            osc.type = "triangle";
+            osc.frequency.setValueAtTime(220, agora);
+            osc.frequency.exponentialRampToValueAtTime(90, agora + 0.18);
             gain.gain.setValueAtTime(0.08, agora);
             gain.gain.exponentialRampToValueAtTime(0.001, agora + 0.2);
             osc.start(agora);
             osc.stop(agora + 0.2);
-        } else if (tipo === "agua") {
-            osc.type = "triangle";
-            osc.frequency.setValueAtTime(220, agora);
-            osc.frequency.exponentialRampToValueAtTime(90, agora + 0.22);
-            gain.gain.setValueAtTime(0.1, agora);
-            gain.gain.exponentialRampToValueAtTime(0.001, agora + 0.24);
-            osc.start(agora);
-            osc.stop(agora + 0.24);
         } else if (tipo === "acerto" || tipo === "afundado") {
             osc.type = "sawtooth";
             osc.frequency.setValueAtTime(tipo === "afundado" ? 130 : 180, agora);
-            osc.frequency.exponentialRampToValueAtTime(42, agora + (tipo === "afundado" ? 0.55 : 0.32));
-            gain.gain.setValueAtTime(0.18, agora);
-            gain.gain.exponentialRampToValueAtTime(0.001, agora + (tipo === "afundado" ? 0.58 : 0.35));
+            osc.frequency.exponentialRampToValueAtTime(42, agora + (tipo === "afundado" ? 0.45 : 0.28));
+            gain.gain.setValueAtTime(0.14, agora);
+            gain.gain.exponentialRampToValueAtTime(0.001, agora + (tipo === "afundado" ? 0.48 : 0.3));
             osc.start(agora);
-            osc.stop(agora + (tipo === "afundado" ? 0.58 : 0.35));
+            osc.stop(agora + (tipo === "afundado" ? 0.48 : 0.3));
         }
     }
 
@@ -66,17 +67,26 @@
     const elGridJogador = document.getElementById("grid-jogador");
     const elGridInimigo = document.getElementById("grid-inimigo");
     const elBtnIniciar = document.getElementById("btn-iniciar-batalha");
+    const elBtnDemo = document.getElementById("btn-demo-ia");
+    const elChkNaoAdjacente = document.getElementById("chk-nao-adjacente");
     const elOrientacaoLabel = document.getElementById("orientacao-label");
 
-    // Utilitário para construir a estrutura 11x11 (coordenadas + células)
+    function pararDemo() {
+        estado.modoDemo = false;
+        if (estado.demoTimer) {
+            clearInterval(estado.demoTimer);
+            estado.demoTimer = null;
+        }
+        elBtnDemo.classList.remove("active");
+        elBtnDemo.textContent = "🤖 Assistir IA vs IA";
+    }
+
     function construirEstruturaGrid(container, onCellClick, onCellHover) {
         container.innerHTML = "";
-        // Canto superior esquerdo vazio
         const canto = document.createElement("div");
         canto.className = "grid-coord";
         container.appendChild(canto);
 
-        // Cabeçalho 1..10
         for (let c = 0; c < TAMANHO; c++) {
             const colHead = document.createElement("div");
             colHead.className = "grid-coord";
@@ -84,7 +94,6 @@
             container.appendChild(colHead);
         }
 
-        // Linhas A..J
         for (let r = 0; r < TAMANHO; r++) {
             const rowHead = document.createElement("div");
             rowHead.className = "grid-coord";
@@ -96,12 +105,8 @@
                 cell.className = "cell";
                 cell.dataset.r = r;
                 cell.dataset.c = c;
-                if (onCellClick) {
-                    cell.addEventListener("click", () => onCellClick(r, c));
-                }
-                if (onCellHover) {
-                    cell.addEventListener("mouseenter", () => onCellHover(r, c));
-                }
+                if (onCellClick) cell.addEventListener("click", () => onCellClick(r, c));
+                if (onCellHover) cell.addEventListener("mouseenter", () => onCellHover(r, c));
                 container.appendChild(cell);
             }
         }
@@ -156,17 +161,28 @@
 
     function podePosicionarSetup(navioId, linha, coluna, tamanho, horizontal) {
         const ocupadas = new Set();
+        const haloBloqueado = new Set();
+
         Object.values(estado.setup.posicionados).forEach((p) => {
             if (p.id === navioId) return;
             obterCelulasNavio(p.linha, p.coluna, p.tamanho, p.horizontal).forEach(([r, c]) => {
                 ocupadas.add(`${r},${c}`);
+                if (estado.setup.naoAdjacente) {
+                    for (let dr = -1; dr <= 1; dr++) {
+                        for (let dc = -1; dc <= 1; dc++) {
+                            haloBloqueado.add(`${r + dr},${c + dc}`);
+                        }
+                    }
+                }
             });
         });
 
         const candidatas = obterCelulasNavio(linha, coluna, tamanho, horizontal);
         for (const [r, c] of candidatas) {
             if (r < 0 || r >= TAMANHO || c < 0 || c >= TAMANHO) return false;
-            if (ocupadas.has(`${r},${c}`)) return false;
+            const chave = `${r},${c}`;
+            if (ocupadas.has(chave)) return false;
+            if (estado.setup.naoAdjacente && haloBloqueado.has(chave)) return false;
         }
         return true;
     }
@@ -232,11 +248,8 @@
         };
         tocarSom("sonar");
 
-        // Seleciona automaticamente o próximo navio ainda não posicionado
         const proximo = FROTA.find((n) => !estado.setup.posicionados[n.id]);
-        if (proximo) {
-            estado.setup.navioSelecionadoId = proximo.id;
-        }
+        if (proximo) estado.setup.navioSelecionadoId = proximo.id;
 
         renderizarDoca();
         atualizarGridSetup();
@@ -247,7 +260,7 @@
         for (const navio of FROTA) {
             let colocado = false;
             let tentativas = 0;
-            while (!colocado && tentativas < 500) {
+            while (!colocado && tentativas < 600) {
                 tentativas++;
                 const horizontal = Math.random() < 0.5;
                 const r = Math.floor(Math.random() * TAMANHO);
@@ -263,6 +276,10 @@
                     colocado = true;
                 }
             }
+            if (!colocado) {
+                gerarFrotaAleatoriaSetup();
+                return;
+            }
         }
         tocarSom("sonar");
         renderizarDoca();
@@ -270,7 +287,7 @@
     }
 
     // =========================================================================
-    // FASE 2: COMBATE E RENDERIZAÇÃO DO MAPA DE CALOR
+    // FASE 2: COMBATE, CONTORNO DE NAVIOS AFUNDADOS & MAPA DE CALOR
     // =========================================================================
     function corMapaCalor(intensidade) {
         if (intensidade <= 0) return "";
@@ -286,14 +303,40 @@
         return `rgba(239, 68, 68, ${0.72 + ((intensidade - 80) / 20) * 0.22})`;
     }
 
+    function construirMapaConexoesAfundados(frota) {
+        const conexoes = new Map();
+        frota.forEach((navio) => {
+            if (!navio.afundado || !navio.posicoes) return;
+            const setPos = new Set(navio.posicoes.map(([r, c]) => `${r},${c}`));
+            navio.posicoes.forEach(([r, c]) => {
+                conexoes.set(`${r},${c}`, {
+                    top: setPos.has(`${r - 1},${c}`),
+                    bottom: setPos.has(`${r + 1},${c}`),
+                    left: setPos.has(`${r},${c - 1}`),
+                    right: setPos.has(`${r},${c + 1}`),
+                });
+            });
+        });
+        return conexoes;
+    }
+
+    function aplicarClassesConexaoSunk(cell, r, c, mapaConexoes) {
+        const conn = mapaConexoes.get(`${r},${c}`);
+        if (!conn) return;
+        if (conn.top) cell.classList.add("sunk-conn-top");
+        if (conn.bottom) cell.classList.add("sunk-conn-bottom");
+        if (conn.left) cell.classList.add("sunk-conn-left");
+        if (conn.right) cell.classList.add("sunk-conn-right");
+    }
+
     function renderizarCombate() {
         const d = estado.dadosJogo;
         if (!d) return;
 
-        // Telemetria superior
         document.getElementById("ia-status").textContent = d.mapa_calor.status_ia;
         document.getElementById("ia-melhor-alvo").textContent =
             `${d.mapa_calor.melhor_alvo} (${d.mapa_calor.pico_probabilidade}%)`;
+        document.getElementById("ia-entropia").textContent = `${d.mapa_calor.entropia_bits.toFixed(2)} bits`;
         document.getElementById("hud-turnos").textContent = d.turnos;
 
         const st = d.estatisticas;
@@ -301,7 +344,10 @@
         const precIA = st.tiros_ia ? Math.round((st.acertos_ia / st.tiros_ia) * 100) : 0;
         document.getElementById("hud-precisao").textContent = `${precJog}% / ${precIA}%`;
 
-        // Renderiza Grid do Jogador + Overlay de Mapa de Calor da IA
+        const conexoesJog = construirMapaConexoesAfundados(d.frota_jogador);
+        const conexoesIA = construirMapaConexoesAfundados(d.frota_ia);
+
+        // Renderiza Grid Aliado + Overlay de Mapa de Calor
         const celulasJog = elGridJogador.querySelectorAll(".cell");
         celulasJog.forEach((cell) => {
             const r = Number(cell.dataset.r);
@@ -318,7 +364,10 @@
             if (val === 1) cell.classList.add("ship");
             else if (val === 2) cell.classList.add("miss", "shot");
             else if (val === 3) cell.classList.add("hit", "shot");
-            else if (val === 4) cell.classList.add("sunk", "shot");
+            else if (val === 4) {
+                cell.classList.add("sunk", "shot");
+                aplicarClassesConexaoSunk(cell, r, c, conexoesJog);
+            }
 
             if (
                 estado.ultimaJogadaIA &&
@@ -328,7 +377,6 @@
                 cell.classList.add("last-ai-shot");
             }
 
-            // Aplica gradiente térmico nas células ainda não atacadas
             if (estado.mostrarCalor && (val === 0 || val === 1) && intensidade > 0) {
                 cell.style.background = corMapaCalor(intensidade);
                 if (chanceReal >= 1.0) {
@@ -351,10 +399,12 @@
             if (val === 1) cell.classList.add("ship");
             else if (val === 2) cell.classList.add("miss", "shot");
             else if (val === 3) cell.classList.add("hit", "shot");
-            else if (val === 4) cell.classList.add("sunk", "shot");
+            else if (val === 4) {
+                cell.classList.add("sunk", "shot");
+                aplicarClassesConexaoSunk(cell, r, c, conexoesIA);
+            }
         });
 
-        // Pills de status das frotas
         renderizarPillsFrota("status-frota-jogador", d.frota_jogador);
         renderizarPillsFrota("status-frota-ia", d.frota_ia);
     }
@@ -378,21 +428,53 @@
         logContainer.prepend(linha);
     }
 
-    async function iniciarNovaBatalha() {
+    function processarRespostaTurno(dados, rotuloAliado = "Você") {
+        estado.dadosJogo = dados;
+        const aj = dados.acao_jogador;
+        const aia = dados.acao_ia;
+
+        if (aj) {
+            tocarSom(aj.resultado);
+            const probStr = aj.probabilidade_alvo ? ` • ${aj.probabilidade_alvo}% prob.` : "";
+            let msgJog = `[TURNO ${String(dados.turnos).padStart(2, "0")}] ${rotuloAliado}${probStr} disparou em ${aj.coordenada} → ${aj.resultado.toUpperCase()}`;
+            if (aj.navio_afundado) msgJog += ` (${aj.navio_afundado.nome} inimigo destruído!)`;
+            adicionarLog(msgJog, aj.resultado !== "agua" ? "player-hit" : "");
+        }
+
+        if (aia) {
+            estado.ultimaJogadaIA = { linha: aia.linha, coluna: aia.coluna };
+            let msgIA = `[IA • ${aia.probabilidade_alvo}% prob.] Disparou em ${aia.coordenada} → ${aia.resultado.toUpperCase()}`;
+            if (aia.navio_afundado) msgIA += ` (Frota aliada perdeu: ${aia.navio_afundado.nome}!)`;
+            adicionarLog(msgIA, aia.resultado !== "agua" ? "ai-hit" : "");
+        }
+
+        renderizarCombate();
+
+        if (dados.encerrado) {
+            pararDemo();
+            exibirModalFim(dados);
+        }
+    }
+
+    async function iniciarNovaBatalha(isDemo = false) {
+        pararDemo();
         const dificuldade = document.getElementById("select-dificuldade").value;
-        const frotaArray = Object.values(estado.setup.posicionados).map((p) => ({
-            id: p.id,
-            linha: p.linha,
-            coluna: p.coluna,
-            horizontal: p.horizontal,
-        }));
+        const frotaArray = !isDemo
+            ? Object.values(estado.setup.posicionados).map((p) => ({
+                  id: p.id,
+                  linha: p.linha,
+                  coluna: p.coluna,
+                  horizontal: p.horizontal,
+              }))
+            : null;
 
         const resp = await fetch("/api/novo-jogo", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
                 dificuldade,
-                frota_jogador: frotaArray.length === FROTA.length ? frotaArray : null,
+                nao_adjacente: estado.setup.naoAdjacente,
+                frota_jogador: frotaArray && frotaArray.length === FROTA.length ? frotaArray : null,
             }),
         });
 
@@ -408,18 +490,56 @@
         estado.bloqueado = false;
 
         document.getElementById("combat-log").innerHTML = "";
+        document.getElementById("titulo-frota-aliada").innerHTML = isDemo
+            ? '🤖 IA ALIADA (ALMIRANTE) <span class="sub-tag">(Alvo do Mapa de Calor)</span>'
+            : '🛡️ SUA FROTA <span class="sub-tag">(Visão da IA)</span>';
+        document.getElementById("turno-indicador").textContent = isDemo
+            ? "SIMULAÇÃO IA vs IA ATIVA"
+            : "SUA VEZ DE ATACAR";
+
+        const regraTexto = dados.nao_adjacente ? " • Regra: Sem Adjacência" : "";
         adicionarLog(
-            `[SISTEMA] Batalha iniciada no modo ${dificuldade.toUpperCase()}. Mapa de calor calibrado.`
+            `[SISTEMA] ${isDemo ? "Simulação IA vs IA" : "Batalha"} iniciada (${dificuldade.toUpperCase()}${regraTexto}).`
         );
 
         elSecaoSetup.classList.add("hidden");
         elSecaoCombate.classList.remove("hidden");
         tocarSom("sonar");
         renderizarCombate();
+
+        if (isDemo) {
+            iniciarLoopDemo();
+        }
+    }
+
+    function iniciarLoopDemo() {
+        estado.modoDemo = true;
+        elBtnDemo.classList.add("active");
+        elBtnDemo.textContent = "⏸ Pausar IA vs IA";
+
+        estado.demoTimer = setInterval(async () => {
+            if (!estado.modoDemo || estado.bloqueado || !estado.dadosJogo || estado.dadosJogo.encerrado) {
+                return;
+            }
+            estado.bloqueado = true;
+            try {
+                const resp = await fetch("/api/turno-auto", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ game_id: estado.gameId }),
+                });
+                const dados = await resp.json();
+                if (resp.ok) {
+                    processarRespostaTurno(dados, "IA Aliada");
+                }
+            } finally {
+                estado.bloqueado = false;
+            }
+        }, 320);
     }
 
     async function dispararContraIA(r, c) {
-        if (estado.bloqueado || !estado.dadosJogo || estado.dadosJogo.encerrado) return;
+        if (estado.modoDemo || estado.bloqueado || !estado.dadosJogo || estado.dadosJogo.encerrado) return;
         if (estado.dadosJogo.tabuleiro_ia[r][c] !== 0) return;
 
         estado.bloqueado = true;
@@ -437,37 +557,14 @@
             });
 
             const dados = await resp.json();
-            if (!resp.ok) {
-                estado.bloqueado = false;
-                return;
-            }
+            if (!resp.ok) return;
 
-            estado.dadosJogo = dados;
-            const aj = dados.acao_jogador;
-            const aia = dados.acao_ia;
-
-            // Som e log do jogador
-            tocarSom(aj.resultado);
-            let msgJog = `[TURNO ${String(dados.turnos).padStart(2, "0")}] Você disparou em ${aj.coordenada} → ${aj.resultado.toUpperCase()}`;
-            if (aj.navio_afundado) msgJog += ` (${aj.navio_afundado.nome} inimigo destruído!)`;
-            adicionarLog(msgJog, aj.resultado !== "agua" ? "player-hit" : "");
-
-            // Log da IA se houve contra-ataque
-            if (aia) {
-                estado.ultimaJogadaIA = { linha: aia.linha, coluna: aia.coluna };
-                let msgIA = `[IA • ${aia.probabilidade_alvo}% prob.] Disparou em ${aia.coordenada} → ${aia.resultado.toUpperCase()}`;
-                if (aia.navio_afundado) msgIA += ` (Seu ${aia.navio_afundado.nome} foi afundado!)`;
-                adicionarLog(msgIA, aia.resultado !== "agua" ? "ai-hit" : "");
-            }
-
-            renderizarCombate();
-
-            if (dados.encerrado) {
-                exibirModalFim(dados);
-            }
+            processarRespostaTurno(dados, "Você");
         } finally {
             estado.bloqueado = false;
-            document.getElementById("turno-indicador").textContent = "SUA VEZ DE ATACAR";
+            if (!estado.modoDemo) {
+                document.getElementById("turno-indicador").textContent = "SUA VEZ DE ATACAR";
+            }
         }
     }
 
@@ -482,13 +579,14 @@
             ? "SUPREMACIA NAVAL ALCANÇADA!"
             : "FROTA NEUTRALIZADA PELA IA";
         document.getElementById("modal-mensagem").textContent = vitoria
-            ? "Você superou o motor de inferência probabilística e afundou toda a esquadra inimiga."
-            : "A Inteligência Artificial mapeou sua formação através da densidade de probabilidade.";
+            ? "A frota inimiga foi completamente localizada e destruída."
+            : "O motor de densidade probabilística mapeou toda a formação aliada.";
 
         document.getElementById("modal-stats").innerHTML = `
             <div>Turnos Totais: <strong>${dados.turnos}</strong></div>
-            <div>Sua Precisão: <strong>${precJog}%</strong> (${st.acertos_jogador}/${st.tiros_jogador})</div>
-            <div>Precisão da IA: <strong>${precIA}%</strong> (${st.acertos_ia}/${st.tiros_ia})</div>
+            <div>Precisão Aliada: <strong>${precJog}%</strong> (${st.acertos_jogador}/${st.tiros_jogador})</div>
+            <div>Precisão IA Inimiga: <strong>${precIA}%</strong> (${st.acertos_ia}/${st.tiros_ia})</div>
+            <div>Entropia Final: <strong>${dados.mapa_calor.entropia_bits.toFixed(2)} bits</strong></div>
         `;
         document.getElementById("modal-fim").classList.remove("hidden");
     }
@@ -498,9 +596,20 @@
     // =========================================================================
     construirEstruturaGrid(elGridSetup, clicarCelulaSetup, atualizarGridSetup);
     elGridSetup.addEventListener("mouseleave", () => atualizarGridSetup());
+    elGridSetup.addEventListener("contextmenu", (e) => {
+        e.preventDefault();
+        estado.setup.horizontal = !estado.setup.horizontal;
+        renderizarDoca();
+        atualizarGridSetup();
+    });
 
     construirEstruturaGrid(elGridJogador, null, null);
     construirEstruturaGrid(elGridInimigo, dispararContraIA, null);
+
+    elChkNaoAdjacente.addEventListener("change", (e) => {
+        estado.setup.naoAdjacente = e.target.checked;
+        gerarFrotaAleatoriaSetup();
+    });
 
     document.getElementById("btn-girar").addEventListener("click", () => {
         estado.setup.horizontal = !estado.setup.horizontal;
@@ -525,7 +634,18 @@
         atualizarGridSetup();
     });
 
-    elBtnIniciar.addEventListener("click", iniciarNovaBatalha);
+    elBtnIniciar.addEventListener("click", () => iniciarNovaBatalha(false));
+
+    elBtnDemo.addEventListener("click", () => {
+        if (estado.modoDemo) {
+            pararDemo();
+            document.getElementById("turno-indicador").textContent = "SIMULAÇÃO PAUSADA";
+        } else if (!elSecaoCombate.classList.contains("hidden") && estado.dadosJogo && !estado.dadosJogo.encerrado) {
+            iniciarLoopDemo();
+        } else {
+            iniciarNovaBatalha(true);
+        }
+    });
 
     document.getElementById("btn-toggle-calor").addEventListener("click", (e) => {
         estado.mostrarCalor = !estado.mostrarCalor;
@@ -543,6 +663,7 @@
     });
 
     function voltarParaSetup() {
+        pararDemo();
         document.getElementById("modal-fim").classList.add("hidden");
         elSecaoCombate.classList.add("hidden");
         elSecaoSetup.classList.remove("hidden");
@@ -552,6 +673,5 @@
     document.getElementById("btn-reiniciar-setup").addEventListener("click", voltarParaSetup);
     document.getElementById("btn-modal-novo").addEventListener("click", voltarParaSetup);
 
-    // Inicia já com uma frota aleatória pronta na doca para facilitar o início imediato
     gerarFrotaAleatoriaSetup();
 })();
