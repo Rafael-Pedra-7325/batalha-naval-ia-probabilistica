@@ -1,5 +1,6 @@
 """
 Servidor Web Flask para o jogo Batalha Naval com IA de Mapa de Calor.
+Inclui suporte à regra opcional de navios não-adjacentes e ao modo demonstração IA vs IA.
 """
 
 import uuid
@@ -12,20 +13,17 @@ from jogo import FROTA_PADRAO, Tabuleiro
 
 app = Flask(__name__)
 
-# Armazenamento em memória das partidas ativas por sessão/game_id
 PARTIDAS: Dict[str, Dict] = {}
 MAX_PARTIDAS_MEMORIA = 200
 
 
 def _limpar_partidas_antigas() -> None:
-    """Mantém o uso de memória controlado removendo partidas mais antigas."""
     while len(PARTIDAS) >= MAX_PARTIDAS_MEMORIA:
         chave_mais_antiga = next(iter(PARTIDAS))
         PARTIDAS.pop(chave_mais_antiga, None)
 
 
 def _serializar_estado(partida: Dict, revelar_ia: bool = False) -> Dict:
-    """Monta o payload JSON completo do estado atual do jogo."""
     tab_jogador: Tabuleiro = partida["tabuleiro_jogador"]
     tab_ia: Tabuleiro = partida["tabuleiro_ia"]
     ia: IAMapaDeCalor = partida["ia"]
@@ -38,6 +36,7 @@ def _serializar_estado(partida: Dict, revelar_ia: bool = False) -> Dict:
     return {
         "game_id": partida["game_id"],
         "dificuldade": ia.dificuldade,
+        "nao_adjacente": partida["nao_adjacente"],
         "encerrado": partida["encerrado"],
         "vencedor": partida["vencedor"],
         "turnos": partida["turnos"],
@@ -52,9 +51,54 @@ def _serializar_estado(partida: Dict, revelar_ia: bool = False) -> Dict:
             "hits_ativos": analise_atual["hits_ativos"],
             "pico_probabilidade": analise_atual["pico_probabilidade"],
             "melhor_alvo": analise_atual["melhor_alvo"],
+            "entropia_bits": analise_atual["entropia_bits"],
         },
         "estatisticas": partida["estatisticas"],
     }
+
+
+def _executar_rodada(partida: Dict, linha: int, coluna: int) -> Dict:
+    """Executa a jogada do lado aliado (humano ou IA aliada) e o contra-ataque inimigo."""
+    tab_ia: Tabuleiro = partida["tabuleiro_ia"]
+    tab_jogador: Tabuleiro = partida["tabuleiro_jogador"]
+    ia: IAMapaDeCalor = partida["ia"]
+
+    resultado_jogador = tab_ia.receber_tiro(linha, coluna)
+    if not resultado_jogador["valido"]:
+        return {"erro": resultado_jogador["motivo"], "status_code": 400}
+
+    partida["turnos"] += 1
+    partida["estatisticas"]["tiros_jogador"] += 1
+    if resultado_jogador["resultado"] in ("acerto", "afundado"):
+        partida["estatisticas"]["acertos_jogador"] += 1
+
+    if resultado_jogador["fim_de_jogo"]:
+        partida["encerrado"] = True
+        partida["vencedor"] = "jogador"
+        estado = _serializar_estado(partida, revelar_ia=True)
+        estado["acao_jogador"] = resultado_jogador
+        estado["acao_ia"] = None
+        return estado
+
+    visao_ia = tab_jogador.visao_publica(revelar_navios=False)
+    restantes_jogador = tab_jogador.tamanhos_navios_restantes()
+    decisao_ia = ia.escolher_jogada(visao_ia, restantes_jogador)
+
+    resultado_ia = tab_jogador.receber_tiro(decisao_ia["linha"], decisao_ia["coluna"])
+    resultado_ia["probabilidade_alvo"] = decisao_ia["probabilidade_alvo"]
+
+    partida["estatisticas"]["tiros_ia"] += 1
+    if resultado_ia["resultado"] in ("acerto", "afundado"):
+        partida["estatisticas"]["acertos_ia"] += 1
+
+    if resultado_ia["fim_de_jogo"]:
+        partida["encerrado"] = True
+        partida["vencedor"] = "ia"
+
+    estado = _serializar_estado(partida, revelar_ia=partida["encerrado"])
+    estado["acao_jogador"] = resultado_jogador
+    estado["acao_ia"] = resultado_ia
+    return estado
 
 
 @app.route("/")
@@ -69,29 +113,35 @@ def novo_jogo():
     if dificuldade not in ("recruta", "comandante", "almirante"):
         dificuldade = "almirante"
 
+    nao_adjacente = bool(dados.get("nao_adjacente", False))
     frota_customizada = dados.get("frota_jogador")
 
-    tab_jogador = Tabuleiro()
+    tab_jogador = Tabuleiro(nao_adjacente=nao_adjacente)
     if frota_customizada:
         sucesso = tab_jogador.posicionar_frota_personalizada(frota_customizada)
         if not sucesso:
             return (
-                jsonify({"erro": "Posicionamento da frota inválido. Verifique sobreposições."}),
+                jsonify(
+                    {
+                        "erro": "Posicionamento inválido. Verifique sobreposições ou a regra de não-adjacência."
+                    }
+                ),
                 400,
             )
     else:
         tab_jogador.posicionar_aleatorio()
 
-    tab_ia = Tabuleiro()
+    tab_ia = Tabuleiro(nao_adjacente=nao_adjacente)
     tab_ia.posicionar_aleatorio()
 
-    ia = IAMapaDeCalor(dificuldade=dificuldade)
+    ia = IAMapaDeCalor(dificuldade=dificuldade, nao_adjacente=nao_adjacente)
 
     _limpar_partidas_antigas()
     game_id = str(uuid.uuid4())
 
     partida = {
         "game_id": game_id,
+        "nao_adjacente": nao_adjacente,
         "tabuleiro_jogador": tab_jogador,
         "tabuleiro_ia": tab_ia,
         "ia": ia,
@@ -128,48 +178,42 @@ def atirar():
     except (TypeError, ValueError):
         return jsonify({"erro": "Coordenadas inválidas."}), 400
 
+    resposta = _executar_rodada(partida, linha, coluna)
+    if "erro" in resposta:
+        return jsonify({"erro": resposta["erro"]}), resposta.get("status_code", 400)
+    return jsonify(resposta)
+
+
+@app.route("/api/turno-auto", methods=["POST"])
+def turno_auto():
+    """Executa um turno completo de demonstração IA Aliada (Almirante) vs IA Inimiga."""
+    dados = request.get_json(silent=True) or {}
+    game_id = dados.get("game_id")
+
+    if not game_id or game_id not in PARTIDAS:
+        return jsonify({"erro": "Partida não encontrada."}), 404
+
+    partida = PARTIDAS[game_id]
+    if partida["encerrado"]:
+        return jsonify(_serializar_estado(partida, revelar_ia=True))
+
     tab_ia: Tabuleiro = partida["tabuleiro_ia"]
-    tab_jogador: Tabuleiro = partida["tabuleiro_jogador"]
-    ia: IAMapaDeCalor = partida["ia"]
+    ia_aliada = IAMapaDeCalor(
+        dificuldade="almirante", nao_adjacente=partida["nao_adjacente"]
+    )
+    decisao_aliada = ia_aliada.escolher_jogada(
+        tab_ia.visao_publica(revelar_navios=False),
+        tab_ia.tamanhos_navios_restantes(),
+    )
 
-    # 1. Jogada do Humano
-    resultado_jogador = tab_ia.receber_tiro(linha, coluna)
-    if not resultado_jogador["valido"]:
-        return jsonify({"erro": resultado_jogador["motivo"]}), 400
-
-    partida["turnos"] += 1
-    partida["estatisticas"]["tiros_jogador"] += 1
-    if resultado_jogador["resultado"] in ("acerto", "afundado"):
-        partida["estatisticas"]["acertos_jogador"] += 1
-
-    if resultado_jogador["fim_de_jogo"]:
-        partida["encerrado"] = True
-        partida["vencedor"] = "jogador"
-        estado = _serializar_estado(partida, revelar_ia=True)
-        estado["acao_jogador"] = resultado_jogador
-        estado["acao_ia"] = None
-        return jsonify(estado)
-
-    # 2. Jogada da Inteligência Artificial
-    visao_ia = tab_jogador.visao_publica(revelar_navios=False)
-    restantes_jogador = tab_jogador.tamanhos_navios_restantes()
-    decisao_ia = ia.escolher_jogada(visao_ia, restantes_jogador)
-
-    resultado_ia = tab_jogador.receber_tiro(decisao_ia["linha"], decisao_ia["coluna"])
-    resultado_ia["probabilidade_alvo"] = decisao_ia["probabilidade_alvo"]
-
-    partida["estatisticas"]["tiros_ia"] += 1
-    if resultado_ia["resultado"] in ("acerto", "afundado"):
-        partida["estatisticas"]["acertos_ia"] += 1
-
-    if resultado_ia["fim_de_jogo"]:
-        partida["encerrado"] = True
-        partida["vencedor"] = "ia"
-
-    estado = _serializar_estado(partida, revelar_ia=partida["encerrado"])
-    estado["acao_jogador"] = resultado_jogador
-    estado["acao_ia"] = resultado_ia
-    return jsonify(estado)
+    resposta = _executar_rodada(
+        partida, decisao_aliada["linha"], decisao_aliada["coluna"]
+    )
+    if "erro" in resposta:
+        return jsonify({"erro": resposta["erro"]}), resposta.get("status_code", 400)
+    if resposta.get("acao_jogador"):
+        resposta["acao_jogador"]["probabilidade_alvo"] = decisao_aliada["probabilidade_alvo"]
+    return jsonify(resposta)
 
 
 if __name__ == "__main__":
