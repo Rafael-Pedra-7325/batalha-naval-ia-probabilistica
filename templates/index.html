@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Batalha Naval — IA de Mapa de Calor</title>
+    <title>Batalha Naval — IA de Mapa de Calor & Multiplayer</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet" />
@@ -17,12 +17,16 @@
             <div class="radar-pulse"></div>
             <div>
                 <h1>BATALHA NAVAL <span class="badge-ia">IA PROBABILÍSTICA</span></h1>
-                <p class="subtitle">Centro de Informações de Combate • Inferência Bayesiana & Entropia</p>
+                <p class="subtitle">Centro de Informações de Combate • Solo vs IA & Online (2 Aparelhos)</p>
             </div>
         </div>
 
         <div class="topbar-controls">
-            <div class="control-group">
+            <button id="btn-abrir-pvp" class="btn btn-emerald" title="Jogar contra um amigo em dois celulares diferentes">
+                👥 2 Jogadores (Online)
+            </button>
+
+            <div class="control-group" id="grupo-dificuldade">
                 <label for="select-dificuldade">Patente da IA</label>
                 <select id="select-dificuldade" class="hud-select">
                     <option value="recruta">Recruta (Híbrido)</option>
@@ -32,7 +36,7 @@
             </div>
 
             <button id="btn-demo-ia" class="btn btn-amber" title="Assistir uma demonstração automática entre duas IAs">
-                🤖 Assistir IA vs IA
+                🤖 IA vs IA
             </button>
 
             <button id="btn-toggle-calor" class="btn btn-cyan active" title="Visualizar probabilidades calculadas pela IA">
@@ -50,6 +54,43 @@
     </header>
 
     <main class="container">
+        <!-- PAINEL MULTIPLAYER ONLINE (2 CELULARES / DISPOSITIVOS) -->
+        <section id="pvp-panel" class="pvp-banner glass-card hidden">
+            <div id="pvp-lobby-box" class="pvp-row">
+                <div class="pvp-info">
+                    <h3>📡 DUELO ONLINE ENTRE 2 APARELHOS (100% GRÁTIS)</h3>
+                    <p>Crie uma sala e envie o link para o outro celular, ou digite o código recebido para entrar.</p>
+                </div>
+                <div class="pvp-actions">
+                    <button id="btn-criar-sala" class="btn btn-emerald">➕ Criar Sala</button>
+                    <div class="join-group">
+                        <input
+                            type="text"
+                            id="input-codigo-sala"
+                            class="hud-input"
+                            maxlength="6"
+                            placeholder="CÓDIGO"
+                            autocomplete="off"
+                        />
+                        <button id="btn-entrar-sala" class="btn btn-cyan">Entrar</button>
+                    </div>
+                    <button id="btn-fechar-pvp" class="btn btn-ghost">✕</button>
+                </div>
+            </div>
+
+            <div id="pvp-sala-ativa-box" class="pvp-row hidden">
+                <div class="pvp-room-badge">
+                    <span class="room-label">SALA ONLINE:</span>
+                    <strong id="pvp-codigo-display" class="room-code">----</strong>
+                    <button id="btn-copiar-link" class="btn btn-cyan btn-sm">📋 Copiar Link de Convite</button>
+                </div>
+                <div class="pvp-status-group">
+                    <span id="pvp-status-conexao" class="status-pill-live">Aguardando adversário entrar...</span>
+                    <button id="btn-sair-sala" class="btn btn-outline btn-sm">Sair da Sala</button>
+                </div>
+            </div>
+        </section>
+
         <!-- FASE 1: POSICIONAMENTO TÁTICO DA FROTA -->
         <section id="secao-setup" class="setup-panel glass-card">
             <div class="setup-header">
@@ -76,7 +117,7 @@
                     <h3>Doca Naval</h3>
                     <div id="lista-doca" class="dock-list"></div>
                     <div class="legend-box">
-                        <p><strong>Dica:</strong> Ative <em>Sem Adjacência</em> para ver a IA zerar automaticamente as 8 células vizinhas assim que um navio afunda.</p>
+                        <p id="setup-dica-texto"><strong>Dica:</strong> Ative <em>Sem Adjacência</em> para ver a IA zerar automaticamente as 8 células vizinhas assim que um navio afunda.</p>
                     </div>
                 </div>
 
@@ -95,7 +136,7 @@
             <!-- Barra de Telemetria da IA -->
             <div class="telemetry-bar glass-card">
                 <div class="telemetry-item">
-                    <span class="telemetry-label">ESTADO NEURAL DA IA</span>
+                    <span class="telemetry-label" id="label-estado-neural">ESTADO NEURAL DA IA</span>
                     <span id="ia-status" class="telemetry-value text-cyan">VARREDURA PROBABILÍSTICA</span>
                 </div>
                 <div class="telemetry-item">
@@ -111,14 +152,14 @@
                     <span id="hud-turnos" class="telemetry-value font-mono">0</span>
                 </div>
                 <div class="telemetry-item">
-                    <span class="telemetry-label">PRECISÃO VOCÊ / IA</span>
+                    <span class="telemetry-label" id="label-precisao">PRECISÃO VOCÊ / IA</span>
                     <span id="hud-precisao" class="telemetry-value font-mono">0% / 0%</span>
                 </div>
             </div>
 
             <!-- Tabuleiros Duplos -->
             <div class="boards-layout">
-                <!-- Tabuleiro do Jogador (com Mapa de Calor) -->
+                <!-- Tabuleiro do Jogador -->
                 <div class="board-card glass-card">
                     <div class="board-header">
                         <div>
@@ -136,11 +177,11 @@
                     <div class="fleet-status" id="status-frota-jogador"></div>
                 </div>
 
-                <!-- Tabuleiro da IA (Ataque) -->
+                <!-- Tabuleiro Inimigo (Ataque) -->
                 <div class="board-card glass-card">
                     <div class="board-header">
                         <div>
-                            <h3>🎯 RADAR INIMIGO <span class="sub-tag">(Clique para Disparar)</span></h3>
+                            <h3 id="titulo-radar-inimigo">🎯 RADAR INIMIGO <span class="sub-tag">(Clique para Disparar)</span></h3>
                         </div>
                         <span id="turno-indicador" class="turn-badge">SUA VEZ DE ATACAR</span>
                     </div>
