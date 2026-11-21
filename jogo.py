@@ -1,6 +1,7 @@
 """
 Módulo de domínio do jogo Batalha Naval.
-Gerencia o tabuleiro 10x10, posicionamento da frota, disparos e condições de vitória.
+Gerencia o tabuleiro 10x10, posicionamento da frota (com suporte opcional à regra
+de navios não-adjacentes), disparos e condições de vitória.
 """
 
 import random
@@ -33,8 +34,9 @@ def coordenada_para_texto(linha: int, coluna: int) -> str:
 class Tabuleiro:
     """Representa o tabuleiro e a frota de um jogador."""
 
-    def __init__(self, tamanho: int = TAMANHO_TABULEIRO):
+    def __init__(self, tamanho: int = TAMANHO_TABULEIRO, nao_adjacente: bool = False):
         self.tamanho = tamanho
+        self.nao_adjacente = nao_adjacente
         self.grade: List[List[int]] = [
             [AGUA for _ in range(tamanho)] for _ in range(tamanho)
         ]
@@ -50,16 +52,27 @@ class Tabuleiro:
     def dentro_dos_limites(self, linha: int, coluna: int) -> bool:
         return 0 <= linha < self.tamanho and 0 <= coluna < self.tamanho
 
+    def _tem_vizinho_ocupado(self, linha: int, coluna: int) -> bool:
+        """Verifica se há algum navio nas 8 células adjacentes."""
+        for dr in (-1, 0, 1):
+            for dc in (-1, 0, 1):
+                nr, nc = linha + dr, coluna + dc
+                if self.dentro_dos_limites(nr, nc) and self.grade[nr][nc] != AGUA:
+                    return True
+        return False
+
     def pode_posicionar(
         self, linha: int, coluna: int, tamanho_navio: int, horizontal: bool
     ) -> bool:
-        """Verifica se um navio cabe e não colide com outro."""
+        """Verifica se um navio cabe e respeita as regras de colisão/adjacência."""
         for i in range(tamanho_navio):
             r = linha if horizontal else linha + i
             c = coluna + i if horizontal else coluna
             if not self.dentro_dos_limites(r, c):
                 return False
             if self.grade[r][c] != AGUA:
+                return False
+            if self.nao_adjacente and self._tem_vizinho_ocupado(r, c):
                 return False
         return True
 
@@ -132,7 +145,7 @@ class Tabuleiro:
         for navio_info in FROTA_PADRAO:
             colocado = False
             tentativas = 0
-            while not colocado and tentativas < 500:
+            while not colocado and tentativas < 600:
                 tentativas += 1
                 horizontal = random.choice([True, False])
                 linha = random.randint(0, self.tamanho - 1)
@@ -141,7 +154,6 @@ class Tabuleiro:
                     navio_info, linha, coluna, horizontal
                 )
             if not colocado:
-                # Reinicia todo o posicionamento em caso raro de bloqueio
                 self.posicionar_aleatorio()
                 return
 
@@ -168,7 +180,6 @@ class Tabuleiro:
                 "fim_de_jogo": False,
             }
 
-        # Acertou um navio (estado_atual == NAVIO)
         self.grade[linha][coluna] = TIRO_ACERTO
         navio_atingido: Optional[Dict] = None
 
