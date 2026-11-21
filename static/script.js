@@ -18,6 +18,15 @@
             naoAdjacente: false,
             posicionados: {},
         },
+        pvp: {
+            ativo: false,
+            codigoSala: null,
+            playerToken: null,
+            papel: null,
+            pollTimer: null,
+            ultimoEventoId: 0,
+            modalExibido: false,
+        },
     };
 
     // Sintetizador de Sonar / Efeitos via Web Audio API
@@ -71,6 +80,12 @@
     const elChkNaoAdjacente = document.getElementById("chk-nao-adjacente");
     const elOrientacaoLabel = document.getElementById("orientacao-label");
 
+    // Elementos PvP
+    const elPvpPanel = document.getElementById("pvp-panel");
+    const elPvpLobbyBox = document.getElementById("pvp-lobby-box");
+    const elPvpSalaAtivaBox = document.getElementById("pvp-sala-ativa-box");
+    const elBtnAbrirPvp = document.getElementById("btn-abrir-pvp");
+
     function pararDemo() {
         estado.modoDemo = false;
         if (estado.demoTimer) {
@@ -78,7 +93,40 @@
             estado.demoTimer = null;
         }
         elBtnDemo.classList.remove("active");
-        elBtnDemo.textContent = "🤖 Assistir IA vs IA";
+        elBtnDemo.textContent = "🤖 IA vs IA";
+    }
+
+    function pararPollingPvp() {
+        if (estado.pvp.pollTimer) {
+            clearInterval(estado.pvp.pollTimer);
+            estado.pvp.pollTimer = null;
+        }
+    }
+
+    function sairDoModoPvp() {
+        pararPollingPvp();
+        estado.pvp = {
+            ativo: false,
+            codigoSala: null,
+            playerToken: null,
+            papel: null,
+            pollTimer: null,
+            ultimoEventoId: 0,
+            modalExibido: false,
+        };
+        elPvpLobbyBox.classList.remove("hidden");
+        elPvpSalaAtivaBox.classList.add("hidden");
+        elBtnAbrirPvp.classList.remove("active");
+        elChkNaoAdjacente.disabled = false;
+        document.getElementById("grupo-dificuldade").classList.remove("hidden");
+        elBtnDemo.classList.remove("hidden");
+        elBtnIniciar.textContent = "🚀 Iniciar Combate";
+        elBtnIniciar.disabled = Object.keys(estado.setup.posicionados).length !== FROTA.length;
+
+        // Limpa parâmetro ?sala= da URL sem recarregar
+        const url = new URL(window.location.href);
+        url.searchParams.delete("sala");
+        window.history.replaceState({}, "", url.toString());
     }
 
     function construirEstruturaGrid(container, onCellClick, onCellHover) {
@@ -145,7 +193,9 @@
         });
 
         const totalColocados = Object.keys(estado.setup.posicionados).length;
-        elBtnIniciar.disabled = totalColocados !== FROTA.length;
+        if (!estado.pvp.ativo || !estado.dadosJogo?.eu_pronto) {
+            elBtnIniciar.disabled = totalColocados !== FROTA.length;
+        }
         elOrientacaoLabel.textContent = `Orientação: ${estado.setup.horizontal ? "HORIZONTAL" : "VERTICAL"}`;
     }
 
@@ -231,6 +281,8 @@
     }
 
     function clicarCelulaSetup(r, c) {
+        if (estado.pvp.ativo && estado.dadosJogo?.eu_pronto) return;
+
         const navioAtual = FROTA.find((n) => n.id === estado.setup.navioSelecionadoId);
         if (!navioAtual) return;
 
@@ -256,6 +308,8 @@
     }
 
     function gerarFrotaAleatoriaSetup() {
+        if (estado.pvp.ativo && estado.dadosJogo?.eu_pronto) return;
+
         estado.setup.posicionados = {};
         for (const navio of FROTA) {
             let colocado = false;
@@ -333,6 +387,15 @@
         const d = estado.dadosJogo;
         if (!d) return;
 
+        const isPvp = d.modo === "pvp";
+
+        document.getElementById("label-estado-neural").textContent = isPvp
+            ? "RADAR ASSISTENTE IA"
+            : "ESTADO NEURAL DA IA";
+        document.getElementById("label-precisao").textContent = isPvp
+            ? "PRECISÃO VOCÊ / RIVAL"
+            : "PRECISÃO VOCÊ / IA";
+
         document.getElementById("ia-status").textContent = d.mapa_calor.status_ia;
         document.getElementById("ia-melhor-alvo").textContent =
             `${d.mapa_calor.melhor_alvo} (${d.mapa_calor.pico_probabilidade}%)`;
@@ -347,7 +410,7 @@
         const conexoesJog = construirMapaConexoesAfundados(d.frota_jogador);
         const conexoesIA = construirMapaConexoesAfundados(d.frota_ia);
 
-        // Renderiza Grid Aliado + Overlay de Mapa de Calor
+        // 1. Renderiza Grid do Jogador (No modo Solo exibe o Mapa de Calor da IA inimiga)
         const celulasJog = elGridJogador.querySelectorAll(".cell");
         celulasJog.forEach((cell) => {
             const r = Number(cell.dataset.r);
@@ -359,7 +422,9 @@
             cell.className = "cell";
             cell.style.background = "";
             cell.innerHTML = "";
-            cell.title = `${LETRAS[r]}${c + 1} — Probabilidade IA: ${chanceReal}%`;
+            cell.title = isPvp
+                ? `${LETRAS[r]}${c + 1}`
+                : `${LETRAS[r]}${c + 1} — Probabilidade IA: ${chanceReal}%`;
 
             if (val === 1) cell.classList.add("ship");
             else if (val === 2) cell.classList.add("miss", "shot");
@@ -377,7 +442,8 @@
                 cell.classList.add("last-ai-shot");
             }
 
-            if (estado.mostrarCalor && (val === 0 || val === 1) && intensidade > 0) {
+            // No modo Solo, o Raio-X mostra onde a IA pretende atirar na sua frota
+            if (!isPvp && estado.mostrarCalor && (val === 0 || val === 1) && intensidade > 0) {
                 cell.style.background = corMapaCalor(intensidade);
                 if (chanceReal >= 1.0) {
                     const span = document.createElement("span");
@@ -388,14 +454,22 @@
             }
         });
 
-        // Renderiza Grid Inimigo
+        // 2. Renderiza Grid Inimigo (No modo PvP, o Raio-X funciona como Assistente Tático aqui)
         const celulasIA = elGridInimigo.querySelectorAll(".cell");
         celulasIA.forEach((cell) => {
             const r = Number(cell.dataset.r);
             const c = Number(cell.dataset.c);
             const val = d.tabuleiro_ia[r][c];
+            const intensidade = d.mapa_calor.intensidade[r][c];
+            const chanceReal = d.mapa_calor.chances_reais[r][c];
 
             cell.className = "cell";
+            cell.style.background = "";
+            cell.innerHTML = "";
+            cell.title = isPvp
+                ? `${LETRAS[r]}${c + 1} — Sugestão IA: ${chanceReal}%`
+                : `${LETRAS[r]}${c + 1}`;
+
             if (val === 1) cell.classList.add("ship");
             else if (val === 2) cell.classList.add("miss", "shot");
             else if (val === 3) cell.classList.add("hit", "shot");
@@ -403,7 +477,37 @@
                 cell.classList.add("sunk", "shot");
                 aplicarClassesConexaoSunk(cell, r, c, conexoesIA);
             }
+
+            if (isPvp && estado.mostrarCalor && val === 0 && intensidade > 0) {
+                cell.style.background = corMapaCalor(intensidade);
+                if (chanceReal >= 1.0) {
+                    const span = document.createElement("span");
+                    span.className = "heat-label";
+                    span.textContent = `${chanceReal.toFixed(0)}%`;
+                    cell.appendChild(span);
+                }
+            }
         });
+
+        // Indicador de turno no modo PvP
+        if (isPvp) {
+            const elIndicador = document.getElementById("turno-indicador");
+            if (d.encerrado) {
+                elIndicador.textContent = "COMBATE ENCERRADO";
+                elIndicador.classList.remove("waiting");
+                elGridInimigo.classList.add("waiting-turn");
+            } else if (d.eh_minha_vez) {
+                elIndicador.textContent = "🔥 SUA VEZ DE ATACAR!";
+                elIndicador.classList.remove("waiting");
+                elGridInimigo.classList.remove("waiting-turn");
+            } else {
+                elIndicador.textContent = "⏳ VEZ DO ADVERSÁRIO...";
+                elIndicador.classList.add("waiting");
+                elGridInimigo.classList.add("waiting-turn");
+            }
+        } else {
+            elGridInimigo.classList.remove("waiting-turn");
+        }
 
         renderizarPillsFrota("status-frota-jogador", d.frota_jogador);
         renderizarPillsFrota("status-frota-ia", d.frota_ia);
@@ -428,7 +532,238 @@
         logContainer.prepend(linha);
     }
 
-    function processarRespostaTurno(dados, rotuloAliado = "Você") {
+    // =========================================================================
+    // FLUXO MULTIPLAYER ONLINE (2 APARELHOS VIA RENDER)
+    // =========================================================================
+    function ativarInterfaceSalaPvp(dados) {
+        estado.pvp.ativo = true;
+        estado.pvp.codigoSala = dados.codigo_sala;
+        estado.pvp.papel = dados.papel;
+        if (dados.player_token) {
+            estado.pvp.playerToken = dados.player_token;
+        }
+
+        elPvpPanel.classList.remove("hidden");
+        elPvpLobbyBox.classList.add("hidden");
+        elPvpSalaAtivaBox.classList.remove("hidden");
+        elBtnAbrirPvp.classList.add("active");
+
+        document.getElementById("pvp-codigo-display").textContent = dados.codigo_sala;
+        document.getElementById("grupo-dificuldade").classList.add("hidden");
+        elBtnDemo.classList.add("hidden");
+
+        // Sincroniza regra de não-adjacência da sala
+        if (estado.setup.naoAdjacente !== dados.nao_adjacente) {
+            estado.setup.naoAdjacente = dados.nao_adjacente;
+            elChkNaoAdjacente.checked = dados.nao_adjacente;
+            gerarFrotaAleatoriaSetup();
+        }
+        elChkNaoAdjacente.disabled = true;
+
+        // Atualiza URL com ?sala=CODIGO
+        const url = new URL(window.location.href);
+        url.searchParams.set("sala", dados.codigo_sala);
+        window.history.replaceState({}, "", url.toString());
+
+        iniciarPollingPvp();
+        sincronizarEstadoPvp(dados);
+    }
+
+    function sincronizarEstadoPvp(dados) {
+        estado.dadosJogo = dados;
+        const elStatus = document.getElementById("pvp-status-conexao");
+
+        if (dados.fase === "aguardando_oponente") {
+            elStatus.textContent = "⏳ Aguardando o 2º jogador entrar pelo link ou código...";
+            elBtnIniciar.textContent = dados.eu_pronto
+                ? "✔ Frota Confirmada (Aguardando Rival)"
+                : "🚀 Confirmar Frota Online";
+            elBtnIniciar.disabled =
+                dados.eu_pronto || Object.keys(estado.setup.posicionados).length !== FROTA.length;
+        } else if (dados.fase === "posicionamento") {
+            if (dados.eu_pronto && !dados.oponente_pronto) {
+                elStatus.textContent = "✔ Você está pronto! Aguardando o rival posicionar a frota...";
+                elBtnIniciar.textContent = "⏳ Aguardando Adversário...";
+                elBtnIniciar.disabled = true;
+            } else if (!dados.eu_pronto && dados.oponente_pronto) {
+                elStatus.textContent = "⚡ O adversário já posicionou! Confirme sua frota para começar.";
+                elBtnIniciar.textContent = "🚀 Confirmar Frota Online";
+                elBtnIniciar.disabled = Object.keys(estado.setup.posicionados).length !== FROTA.length;
+            } else {
+                elStatus.textContent = "🟢 2 jogadores conectados! Posicionem suas frotas.";
+                elBtnIniciar.textContent = "🚀 Confirmar Frota Online";
+                elBtnIniciar.disabled = Object.keys(estado.setup.posicionados).length !== FROTA.length;
+            }
+        } else if (dados.fase === "combate" || dados.fase === "encerrado") {
+            elStatus.textContent =
+                dados.fase === "combate"
+                    ? "🟢 Partida Online em Andamento"
+                    : "🏁 Partida Online Finalizada";
+
+            if (elSecaoCombate.classList.contains("hidden")) {
+                elSecaoSetup.classList.add("hidden");
+                elSecaoCombate.classList.remove("hidden");
+                document.getElementById("combat-log").innerHTML = "";
+                document.getElementById("titulo-frota-aliada").innerHTML =
+                    '🛡️ SUA FROTA <span class="sub-tag">(Seu Tabuleiro)</span>';
+                document.getElementById("titulo-radar-inimigo").innerHTML =
+                    '🎯 FROTA DO ADVERSÁRIO <span class="sub-tag">(Raio-X IA Opcional)</span>';
+                adicionarLog(
+                    `[SALA ${dados.codigo_sala}] Combate iniciado! Você é o Jogador ${dados.papel === "p1" ? "1" : "2"}.`
+                );
+                tocarSom("sonar");
+            }
+
+            // Processa novo disparo ocorrido na sala (seu ou do adversário)
+            const ev = dados.ultimo_evento;
+            if (ev && ev.id > estado.pvp.ultimoEventoId) {
+                estado.pvp.ultimoEventoId = ev.id;
+                tocarSom(ev.resultado);
+
+                const fuiEu = ev.atacante === estado.pvp.papel;
+                if (fuiEu) {
+                    let msg = `[TURNO ${String(ev.turno).padStart(2, "0")}] Você disparou em ${ev.coordenada} → ${ev.resultado.toUpperCase()}`;
+                    if (ev.navio_afundado) msg += ` (${ev.navio_afundado.nome} inimigo destruído!)`;
+                    adicionarLog(msg, ev.resultado !== "agua" ? "player-hit" : "");
+                } else {
+                    estado.ultimaJogadaIA = { linha: ev.linha, coluna: ev.coluna };
+                    let msg = `[TURNO ${String(ev.turno).padStart(2, "0")}] Adversário disparou em ${ev.coordenada} → ${ev.resultado.toUpperCase()}`;
+                    if (ev.navio_afundado) msg += ` (Você perdeu: ${ev.navio_afundado.nome}!)`;
+                    adicionarLog(msg, ev.resultado !== "agua" ? "ai-hit" : "");
+                }
+            }
+
+            renderizarCombate();
+
+            if (dados.encerrado && !estado.pvp.modalExibido) {
+                estado.pvp.modalExibido = true;
+                pararPollingPvp();
+                exibirModalFim(dados);
+            }
+        }
+    }
+
+    function iniciarPollingPvp() {
+        pararPollingPvp();
+        estado.pvp.pollTimer = setInterval(async () => {
+            if (!estado.pvp.ativo || !estado.pvp.codigoSala || !estado.pvp.playerToken) return;
+            try {
+                const resp = await fetch("/api/pvp/estado", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        codigo_sala: estado.pvp.codigoSala,
+                        player_token: estado.pvp.playerToken,
+                    }),
+                });
+                if (resp.ok) {
+                    const dados = await resp.json();
+                    sincronizarEstadoPvp(dados);
+                }
+            } catch (_) {
+                // Ignora falhas temporárias de rede móvel e tenta novamente no próximo ciclo
+            }
+        }, 1500);
+    }
+
+    async function criarSalaOnline() {
+        pararDemo();
+        const resp = await fetch("/api/pvp/criar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ nao_adjacente: estado.setup.naoAdjacente }),
+        });
+        const dados = await resp.json();
+        if (!resp.ok) {
+            alert(dados.erro || "Erro ao criar sala.");
+            return;
+        }
+        tocarSom("sonar");
+        ativarInterfaceSalaPvp(dados);
+    }
+
+    async function entrarSalaOnline(codigoInformado) {
+        const codigo = (codigoInformado || document.getElementById("input-codigo-sala").value)
+            .trim()
+            .toUpperCase();
+        if (!codigo) {
+            alert("Digite o código da sala para entrar.");
+            return;
+        }
+        pararDemo();
+        const resp = await fetch("/api/pvp/entrar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                codigo_sala: codigo,
+                player_token: estado.pvp.playerToken,
+            }),
+        });
+        const dados = await resp.json();
+        if (!resp.ok) {
+            alert(dados.erro || "Não foi possível entrar na sala.");
+            return;
+        }
+        tocarSom("sonar");
+        ativarInterfaceSalaPvp(dados);
+    }
+
+    async function confirmarFrotaPvp() {
+        const frotaArray = Object.values(estado.setup.posicionados).map((p) => ({
+            id: p.id,
+            linha: p.linha,
+            coluna: p.coluna,
+            horizontal: p.horizontal,
+        }));
+
+        const resp = await fetch("/api/pvp/posicionar", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                codigo_sala: estado.pvp.codigoSala,
+                player_token: estado.pvp.playerToken,
+                frota_jogador: frotaArray,
+            }),
+        });
+        const dados = await resp.json();
+        if (!resp.ok) {
+            alert(dados.erro || "Erro ao confirmar frota.");
+            return;
+        }
+        tocarSom("sonar");
+        sincronizarEstadoPvp(dados);
+    }
+
+    async function dispararPvp(r, c) {
+        if (estado.bloqueado || !estado.dadosJogo || estado.dadosJogo.encerrado) return;
+        if (!estado.dadosJogo.eh_minha_vez) return;
+        if (estado.dadosJogo.tabuleiro_ia[r][c] !== 0) return;
+
+        estado.bloqueado = true;
+        try {
+            const resp = await fetch("/api/pvp/atirar", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    codigo_sala: estado.pvp.codigoSala,
+                    player_token: estado.pvp.playerToken,
+                    linha: r,
+                    coluna: c,
+                }),
+            });
+            const dados = await resp.json();
+            if (resp.ok) {
+                sincronizarEstadoPvp(dados);
+            }
+        } finally {
+            estado.bloqueado = false;
+        }
+    }
+
+    // =========================================================================
+    // FLUXO SOLO vs IA & MODO DEMONSTRAÇÃO
+    // =========================================================================
+    function processarRespostaTurnoSolo(dados, rotuloAliado = "Você") {
         estado.dadosJogo = dados;
         const aj = dados.acao_jogador;
         const aia = dados.acao_ia;
@@ -457,6 +792,11 @@
     }
 
     async function iniciarNovaBatalha(isDemo = false) {
+        if (estado.pvp.ativo && !isDemo) {
+            await confirmarFrotaPvp();
+            return;
+        }
+
         pararDemo();
         const dificuldade = document.getElementById("select-dificuldade").value;
         const frotaArray = !isDemo
@@ -493,6 +833,8 @@
         document.getElementById("titulo-frota-aliada").innerHTML = isDemo
             ? '🤖 IA ALIADA (ALMIRANTE) <span class="sub-tag">(Alvo do Mapa de Calor)</span>'
             : '🛡️ SUA FROTA <span class="sub-tag">(Visão da IA)</span>';
+        document.getElementById("titulo-radar-inimigo").innerHTML =
+            '🎯 RADAR INIMIGO <span class="sub-tag">(Clique para Disparar)</span>';
         document.getElementById("turno-indicador").textContent = isDemo
             ? "SIMULAÇÃO IA vs IA ATIVA"
             : "SUA VEZ DE ATACAR";
@@ -530,7 +872,7 @@
                 });
                 const dados = await resp.json();
                 if (resp.ok) {
-                    processarRespostaTurno(dados, "IA Aliada");
+                    processarRespostaTurnoSolo(dados, "IA Aliada");
                 }
             } finally {
                 estado.bloqueado = false;
@@ -538,7 +880,12 @@
         }, 320);
     }
 
-    async function dispararContraIA(r, c) {
+    async function dispararContraInimigo(r, c) {
+        if (estado.pvp.ativo) {
+            await dispararPvp(r, c);
+            return;
+        }
+
         if (estado.modoDemo || estado.bloqueado || !estado.dadosJogo || estado.dadosJogo.encerrado) return;
         if (estado.dadosJogo.tabuleiro_ia[r][c] !== 0) return;
 
@@ -559,16 +906,17 @@
             const dados = await resp.json();
             if (!resp.ok) return;
 
-            processarRespostaTurno(dados, "Você");
+            processarRespostaTurnoSolo(dados, "Você");
         } finally {
             estado.bloqueado = false;
-            if (!estado.modoDemo) {
+            if (!estado.modoDemo && !estado.pvp.ativo) {
                 document.getElementById("turno-indicador").textContent = "SUA VEZ DE ATACAR";
             }
         }
     }
 
     function exibirModalFim(dados) {
+        const isPvp = dados.modo === "pvp";
         const vitoria = dados.vencedor === "jogador";
         const st = dados.estatisticas;
         const precJog = st.tiros_jogador ? Math.round((st.acertos_jogador / st.tiros_jogador) * 100) : 0;
@@ -577,15 +925,20 @@
         document.getElementById("modal-icone").textContent = vitoria ? "🏆" : "💀";
         document.getElementById("modal-titulo").textContent = vitoria
             ? "SUPREMACIA NAVAL ALCANÇADA!"
+            : isPvp
+            ? "FROTA NEUTRALIZADA PELO ADVERSÁRIO"
             : "FROTA NEUTRALIZADA PELA IA";
+
         document.getElementById("modal-mensagem").textContent = vitoria
             ? "A frota inimiga foi completamente localizada e destruída."
+            : isPvp
+            ? "Seu adversário afundou todas as suas embarcações primeiro."
             : "O motor de densidade probabilística mapeou toda a formação aliada.";
 
         document.getElementById("modal-stats").innerHTML = `
             <div>Turnos Totais: <strong>${dados.turnos}</strong></div>
-            <div>Precisão Aliada: <strong>${precJog}%</strong> (${st.acertos_jogador}/${st.tiros_jogador})</div>
-            <div>Precisão IA Inimiga: <strong>${precIA}%</strong> (${st.acertos_ia}/${st.tiros_ia})</div>
+            <div>Sua Precisão: <strong>${precJog}%</strong> (${st.acertos_jogador}/${st.tiros_jogador})</div>
+            <div>Precisão ${isPvp ? "Adversário" : "IA"}: <strong>${precIA}%</strong> (${st.acertos_ia}/${st.tiros_ia})</div>
             <div>Entropia Final: <strong>${dados.mapa_calor.entropia_bits.toFixed(2)} bits</strong></div>
         `;
         document.getElementById("modal-fim").classList.remove("hidden");
@@ -604,8 +957,46 @@
     });
 
     construirEstruturaGrid(elGridJogador, null, null);
-    construirEstruturaGrid(elGridInimigo, dispararContraIA, null);
+    construirEstruturaGrid(elGridInimigo, dispararContraInimigo, null);
 
+    // Eventos PvP Online
+    elBtnAbrirPvp.addEventListener("click", () => {
+        elPvpPanel.classList.toggle("hidden");
+    });
+
+    document.getElementById("btn-fechar-pvp").addEventListener("click", () => {
+        elPvpPanel.classList.add("hidden");
+    });
+
+    document.getElementById("btn-criar-sala").addEventListener("click", criarSalaOnline);
+    document.getElementById("btn-entrar-sala").addEventListener("click", () => entrarSalaOnline());
+
+    document.getElementById("input-codigo-sala").addEventListener("keydown", (e) => {
+        if (e.key === "Enter") entrarSalaOnline();
+    });
+
+    document.getElementById("btn-copiar-link").addEventListener("click", async (e) => {
+        const urlConvite = `${window.location.origin}/?sala=${estado.pvp.codigoSala}`;
+        try {
+            await navigator.clipboard.writeText(urlConvite);
+            const btn = e.currentTarget;
+            btn.textContent = "✔ Link Copiado!";
+            setTimeout(() => {
+                btn.textContent = "📋 Copiar Link de Convite";
+            }, 2200);
+        } catch (_) {
+            prompt("Copie o link de convite para enviar ao outro celular:", urlConvite);
+        }
+    });
+
+    document.getElementById("btn-sair-sala").addEventListener("click", () => {
+        sairDoModoPvp();
+        elSecaoCombate.classList.add("hidden");
+        elSecaoSetup.classList.remove("hidden");
+        gerarFrotaAleatoriaSetup();
+    });
+
+    // Eventos Setup & Controles Gerais
     elChkNaoAdjacente.addEventListener("change", (e) => {
         estado.setup.naoAdjacente = e.target.checked;
         gerarFrotaAleatoriaSetup();
@@ -628,6 +1019,7 @@
     document.getElementById("btn-aleatorio").addEventListener("click", gerarFrotaAleatoriaSetup);
 
     document.getElementById("btn-limpar").addEventListener("click", () => {
+        if (estado.pvp.ativo && estado.dadosJogo?.eu_pronto) return;
         estado.setup.posicionados = {};
         estado.setup.navioSelecionadoId = FROTA[0]?.id || null;
         renderizarDoca();
@@ -664,6 +1056,9 @@
 
     function voltarParaSetup() {
         pararDemo();
+        if (estado.pvp.ativo) {
+            sairDoModoPvp();
+        }
         document.getElementById("modal-fim").classList.add("hidden");
         elSecaoCombate.classList.add("hidden");
         elSecaoSetup.classList.remove("hidden");
@@ -673,5 +1068,13 @@
     document.getElementById("btn-reiniciar-setup").addEventListener("click", voltarParaSetup);
     document.getElementById("btn-modal-novo").addEventListener("click", voltarParaSetup);
 
+    // Inicialização e detecção automática de convite via ?sala=CODIGO
     gerarFrotaAleatoriaSetup();
+    const paramsUrl = new URLSearchParams(window.location.search);
+    const salaConvite = paramsUrl.get("sala");
+    if (salaConvite) {
+        elPvpPanel.classList.remove("hidden");
+        document.getElementById("input-codigo-sala").value = salaConvite.toUpperCase();
+        entrarSalaOnline(salaConvite);
+    }
 })();
