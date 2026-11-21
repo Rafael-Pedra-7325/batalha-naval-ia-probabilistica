@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Batalha Naval — IA de Mapa de Calor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&family=Orbitron:wght@600;700;800&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}" />
+</head>
+<body>
+    <div class="radar-bg"></div>
+
+    <header class="topbar">
+        <div class="brand">
+            <div class="radar-pulse"></div>
+            <div>
+                <h1>BATALHA NAVAL <span class="badge-ia">IA PROBABILÍSTICA</span></h1>
+                <p class="subtitle">Centro de Informações de Combate • Inferência Bayesiana em Tempo Real</p>
+            </div>
+        </div>
+
+        <div class="topbar-controls">
+            <div class="control-group">
+                <label for="select-dificuldade">Patente da IA</label>
+                <select id="select-dificuldade" class="hud-select">
+                    <option value="recruta">Recruta (Híbrido)</option>
+                    <option value="comandante">Comandante (Tático)</option>
+                    <option value="almirante" selected>Almirante (Mapa de Calor Máximo)</option>
+                </select>
+            </div>
+
+            <button id="btn-toggle-calor" class="btn btn-cyan active" title="Visualizar probabilidades calculadas pela IA">
+                <span class="dot-live"></span> Raio-X IA: ON
+            </button>
+
+            <button id="btn-toggle-som" class="btn btn-ghost active" title="Ativar/Desativar efeitos sonoros de sonar">
+                🔊 Sonar
+            </button>
+
+            <button id="btn-reiniciar-setup" class="btn btn-outline">
+                ↺ Nova Frota
+            </button>
+        </div>
+    </header>
+
+    <main class="container">
+        <!-- FASE 1: POSICIONAMENTO TÁTICO DA FROTA -->
+        <section id="secao-setup" class="setup-panel glass-card">
+            <div class="setup-header">
+                <div>
+                    <h2>1. Posicionamento Tático da Frota</h2>
+                    <p>Selecione uma embarcação na doca, pressione <strong>[R]</strong> para girar e clique no grid para posicionar.</p>
+                </div>
+                <div class="setup-actions">
+                    <button id="btn-girar" class="btn btn-ghost">⟳ Girar Navio [R]</button>
+                    <button id="btn-aleatorio" class="btn btn-cyan">⚡ Aleatório</button>
+                    <button id="btn-limpar" class="btn btn-ghost">✕ Limpar</button>
+                    <button id="btn-iniciar-batalha" class="btn btn-primary" disabled>
+                        🚀 Iniciar Combate
+                    </button>
+                </div>
+            </div>
+
+            <div class="setup-body">
+                <div class="dock-container">
+                    <h3>Doca Naval</h3>
+                    <div id="lista-doca" class="dock-list"></div>
+                    <div class="legend-box">
+                        <p><strong>Dica:</strong> Você pode clicar em <em>Aleatório</em> para iniciar instantaneamente ou montar sua formação defensiva para testar a IA.</p>
+                    </div>
+                </div>
+
+                <div class="grid-wrapper">
+                    <div class="grid-title">
+                        <span>SEU SETOR MARÍTIMO (10×10)</span>
+                        <span id="orientacao-label" class="tag-orientacao">Orientação: HORIZONTAL</span>
+                    </div>
+                    <div id="grid-setup" class="naval-grid"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- FASE 2: ARENA DE COMBATE & TELEMETRIA DA IA -->
+        <section id="secao-combate" class="combat-arena hidden">
+            <!-- Barra de Telemetria da IA -->
+            <div class="telemetry-bar glass-card">
+                <div class="telemetry-item">
+                    <span class="telemetry-label">ESTADO NEURAL DA IA</span>
+                    <span id="ia-status" class="telemetry-value text-cyan">VARREDURA PROBABILÍSTICA</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">ALVO DE MAIOR DENSIDADE</span>
+                    <span id="ia-melhor-alvo" class="telemetry-value font-mono">—</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">TURNO</span>
+                    <span id="hud-turnos" class="telemetry-value font-mono">0</span>
+                </div>
+                <div class="telemetry-item">
+                    <span class="telemetry-label">PRECISÃO VOCÊ / IA</span>
+                    <span id="hud-precisao" class="telemetry-value font-mono">0% / 0%</span>
+                </div>
+            </div>
+
+            <!-- Tabuleiros Duplos -->
+            <div class="boards-layout">
+                <!-- Tabuleiro do Jogador (com Mapa de Calor) -->
+                <div class="board-card glass-card">
+                    <div class="board-header">
+                        <div>
+                            <h3>🛡️ SUA FROTA <span class="sub-tag">(Visão da IA)</span></h3>
+                        </div>
+                        <div class="heatmap-legend" id="heatmap-legend">
+                            <span>Frio</span>
+                            <div class="gradient-bar"></div>
+                            <span>Crítico</span>
+                        </div>
+                    </div>
+
+                    <div id="grid-jogador" class="naval-grid"></div>
+
+                    <div class="fleet-status" id="status-frota-jogador"></div>
+                </div>
+
+                <!-- Tabuleiro da IA (Ataque) -->
+                <div class="board-card glass-card">
+                    <div class="board-header">
+                        <div>
+                            <h3>🎯 RADAR INIMIGO <span class="sub-tag">(Clique para Disparar)</span></h3>
+                        </div>
+                        <span id="turno-indicador" class="turn-badge">SUA VEZ DE ATACAR</span>
+                    </div>
+
+                    <div id="grid-inimigo" class="naval-grid attack-grid"></div>
+
+                    <div class="fleet-status" id="status-frota-ia"></div>
+                </div>
+            </div>
+
+            <!-- Log Tático de Combate -->
+            <div class="log-panel glass-card">
+                <div class="log-header">
+                    <span>📡 REGISTRO TÁTICO DE TELEMETRIA</span>
+                    <span class="log-hint">Probabilidades recalculadas a cada disparo</span>
+                </div>
+                <div id="combat-log" class="log-entries"></div>
+            </div>
+        </section>
+    </main>
+
+    <!-- Modal de Fim de Jogo -->
+    <div id="modal-fim" class="modal-backdrop hidden">
+        <div class="modal-card glass-card">
+            <div id="modal-icone" class="modal-icon">🏆</div>
+            <h2 id="modal-titulo">VITÓRIA NAVAL!</h2>
+            <p id="modal-mensagem">Você neutralizou toda a frota adversária.</p>
+            <div id="modal-stats" class="modal-stats"></div>
+            <button id="btn-modal-novo" class="btn btn-primary">Jogar Novamente</button>
+        </div>
+    </div>
+
+    <script>
+        window.FROTA_PADRAO = {{ frota_padrao | tojson }};
+    </script>
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>
