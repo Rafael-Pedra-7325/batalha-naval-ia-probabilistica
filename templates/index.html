@@ -17,7 +17,7 @@
             <div class="radar-pulse"></div>
             <div>
                 <h1>BATALHA NAVAL <span class="badge-ia">IA PROBABILÍSTICA</span></h1>
-                <p class="subtitle">Centro de Informações de Combate • Inferência Bayesiana em Tempo Real</p>
+                <p class="subtitle">Centro de Informações de Combate • Inferência Bayesiana & Entropia</p>
             </div>
         </div>
 
@@ -30,6 +30,10 @@
                     <option value="almirante" selected>Almirante (Mapa de Calor Máximo)</option>
                 </select>
             </div>
+
+            <button id="btn-demo-ia" class="btn btn-amber" title="Assistir uma demonstração automática entre duas IAs">
+                🤖 Assistir IA vs IA
+            </button>
 
             <button id="btn-toggle-calor" class="btn btn-cyan active" title="Visualizar probabilidades calculadas pela IA">
                 <span class="dot-live"></span> Raio-X IA: ON
@@ -51,10 +55,14 @@
             <div class="setup-header">
                 <div>
                     <h2>1. Posicionamento Tático da Frota</h2>
-                    <p>Selecione uma embarcação na doca, pressione <strong>[R]</strong> para girar e clique no grid para posicionar.</p>
+                    <p>Selecione uma embarcação na doca, pressione <strong>[R]</strong> ou <strong>Botão Direito</strong> para girar e clique no grid.</p>
                 </div>
                 <div class="setup-actions">
-                    <button id="btn-girar" class="btn btn-ghost">⟳ Girar Navio [R]</button>
+                    <label class="toggle-rule" title="Impede que navios encostem uns nos outros, ativando o halo de exclusão da IA">
+                        <input type="checkbox" id="chk-nao-adjacente" />
+                        <span>Sem Adjacência</span>
+                    </label>
+                    <button id="btn-girar" class="btn btn-ghost">⟳ Girar [R]</button>
                     <button id="btn-aleatorio" class="btn btn-cyan">⚡ Aleatório</button>
                     <button id="btn-limpar" class="btn btn-ghost">✕ Limpar</button>
                     <button id="btn-iniciar-batalha" class="btn btn-primary" disabled>
@@ -68,7 +76,7 @@
                     <h3>Doca Naval</h3>
                     <div id="lista-doca" class="dock-list"></div>
                     <div class="legend-box">
-                        <p><strong>Dica:</strong> Você pode clicar em <em>Aleatório</em> para iniciar instantaneamente ou montar sua formação defensiva para testar a IA.</p>
+                        <p><strong>Dica:</strong> Ative <em>Sem Adjacência</em> para ver a IA zerar automaticamente as 8 células vizinhas assim que um navio afunda.</p>
                     </div>
                 </div>
 
@@ -95,6 +103,10 @@
                     <span id="ia-melhor-alvo" class="telemetry-value font-mono">—</span>
                 </div>
                 <div class="telemetry-item">
+                    <span class="telemetry-label">INCERTEZA (ENTROPIA)</span>
+                    <span id="ia-entropia" class="telemetry-value font-mono text-amber">6.45 bits</span>
+                </div>
+                <div class="telemetry-item">
                     <span class="telemetry-label">TURNO</span>
                     <span id="hud-turnos" class="telemetry-value font-mono">0</span>
                 </div>
@@ -110,7 +122,7 @@
                 <div class="board-card glass-card">
                     <div class="board-header">
                         <div>
-                            <h3>🛡️ SUA FROTA <span class="sub-tag">(Visão da IA)</span></h3>
+                            <h3 id="titulo-frota-aliada">🛡️ SUA FROTA <span class="sub-tag">(Visão da IA)</span></h3>
                         </div>
                         <div class="heatmap-legend" id="heatmap-legend">
                             <span>Frio</span>
@@ -143,7 +155,7 @@
             <div class="log-panel glass-card">
                 <div class="log-header">
                     <span>📡 REGISTRO TÁTICO DE TELEMETRIA</span>
-                    <span class="log-hint">Probabilidades recalculadas a cada disparo</span>
+                    <span class="log-hint">Probabilidades e entropia recalculadas a cada disparo</span>
                 </div>
                 <div id="combat-log" class="log-entries"></div>
             </div>
